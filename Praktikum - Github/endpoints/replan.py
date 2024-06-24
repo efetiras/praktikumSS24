@@ -23,7 +23,7 @@ def replan():
     url = "https://cpee.org/flow/start/url/"
     payload = {
         "behavior": "fork_running",
-        "url": "https://cpee.org/hub/server/Teaching.dir/Prak.dir/Challengers.dir/Efe_Tiras.dir/Test.xml",
+        "url": "https://cpee.org/hub/server/Teaching.dir/Prak.dir/Challengers.dir/Efe_Tiras1.dir/Test.xml",
         "init": json.dumps({
             "patientStatus": patient_status,
             "patientID": patient_id,
