@@ -13,13 +13,16 @@ from endpoints.resources import resources_status
 from endpoints.releaseResources import release_resources
 from endpoints.intake import intake
 from endpoints.releasing import releasing
-from utils import are_resources_available, patients
+from utils import are_resources_available, patients, resource_available
 from redis import Redis
 from rq import Queue, Connection, Worker
 from concurrent.futures import ThreadPoolExecutor
 import json
 import threading
 import numpy as np
+import queue
+
+
 
 # Create ThreadPoolExecutors to manage worker threads with different max workers
 er_executor = ThreadPoolExecutor(max_workers=3)# Example: 3 workers for ER room
@@ -27,6 +30,37 @@ intake_executor = ThreadPoolExecutor(max_workers=4)
 surgery_executor = ThreadPoolExecutor(max_workers=5)
 nursingA_executor = ThreadPoolExecutor(max_workers=30)
 nursingB_executor = ThreadPoolExecutor(max_workers=40)
+
+# Create a priority queue
+task_queue = queue.PriorityQueue()
+
+def process_task_queue():
+    while True:
+        priority, resource_type, patient_id, patient_status, callback_url = task_queue.get()
+        if resource_type == 'er' and resource_available('er'):
+            er_executor.submit(er_treatment, patient_id, patient_status, callback_url)
+        elif resource_type == 'intake' and resource_available('intake'):
+            intake_executor.submit(intake, patient_id, patient_status, callback_url)
+        elif resource_type == 'surgery' and resource_available('surgery'):
+            surgery_executor.submit(surgery, patient_id, patient_status, callback_url)
+        elif resource_type == 'nursing':
+            if patient_status.startswith('A') or (patient_status.startswith('EM - ') and patient_status.split(' - ')[1].startswith('A')):
+                if resource_available('nursingA'):
+                    nursingA_executor.submit(nursing, patient_id, patient_status, callback_url)
+                else:
+                    task_queue.put((priority, resource_type, patient_id, patient_status, callback_url))  # Requeue if not available
+            elif patient_status.startswith('B') or (patient_status.startswith('EM - ') and patient_status.split(' - ')[1].startswith('B')):
+                if resource_available('nursingB'):
+                    nursingB_executor.submit(nursing, patient_id, patient_status, callback_url)
+                else:
+                    task_queue.put((priority, resource_type, patient_id, patient_status, callback_url))   # Requeue if not available
+        else:
+            task_queue.put((priority, resource_type, patient_id, patient_status, callback_url))  # Requeue if not available
+        task_queue.task_done()
+        print(f"Queue size: {task_queue.qsize()}")
+
+# Start thread to process task queue
+threading.Thread(target=process_task_queue, daemon=True).start()
 
 @bottle.route('/add-job',method='GET')
 def add_job():
@@ -40,25 +74,12 @@ def add_job():
           response.status = 400
           return json.dumps({'error': str(e)})
 
-        print(patient_id, patient_status, resource_type)
-        if resource_type == 'er':
-            print(er_treatment)
-            er_executor.submit(er_treatment,patient_id,patient_status, callback_url)
-        elif resource_type == 'intake':
-            print(intake)
-            intake_executor.submit(intake, patient_id, patient_status, callback_url)
-        elif resource_type == 'surgery':
-            surgery_executor.submit(surgery, patient_id, patient_status, callback_url)
-        elif resource_type == 'nursing':
-            if patient_status.startswith('A') or (patient_status.startswith('EM - ') and patient_status.split(' - ')[1].startswith('A')):
-                nursingA_executor.submit(nursing, patient_id, patient_status, callback_url)
-            elif patient_status.startswith('B') or (patient_status.startswith('EM - ') and patient_status.split(' - ')[1].startswith('B')):
-                nursingB_executor.submit(nursing, patient_id, patient_status, callback_url)
-        else:
-          response.status = 400
-          return json.dumps({'error': 'Invalid resource type'})
-          
-         # Immediate response indicating the request is accepted for async processing
+        # Assign priority: ER patients get highest priority (lowest number)
+        priority = 1 if resource_type == 'er' else 2
+
+        # Add the task to the priority queue
+        task_queue.put((priority, resource_type, patient_id, patient_status, callback_url))
+
         return bottle.HTTPResponse(
             json.dumps({'Ack.:': 'Response later'}),
             status=202,
