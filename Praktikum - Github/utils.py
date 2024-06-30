@@ -25,7 +25,13 @@ resources = {
     'nursing_ward_B': 40,
     'emergency_personnel': 9
 }
-
+resource_mapping = {
+    'er': 'emergency_personnel',
+    'intake': 'intake',
+    'surgery': 'operating_rooms_working_hours',  # Assuming we're checking for working hours
+    'nursingA': 'nursing_ward_A',
+    'nursingB': 'nursing_ward_B'
+}
 # In-memory dictionary to store patient data
 patients = {}
 
@@ -111,3 +117,13 @@ def get_complication(patient_status):
 
 def are_resources_available():
     return all(value > 0 for value in resources.values())
+
+def resource_available(resource_type):
+    # Get the corresponding key from the resource_mapping dictionary
+    resource_key = resource_mapping.get(resource_type)
+    # Check if the resource_key is valid and exists in the resources dictionary
+    if resource_key and resource_key in resources:
+        # Check if the resource is available
+        return resources[resource_key] > 0
+    # Return False if the resource_key is not valid or does not exist in the resources dictionary
+    return False
